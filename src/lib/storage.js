@@ -80,28 +80,19 @@ export async function loadCloudData(user) {
   throwIfError(savedFoodsResult);
   const latestWeight = (throwIfError(weightResult) || [])[0];
 
-  let entries = [...foodRows.map(entryFromFoodRow), ...activityRows.map(entryFromActivityRow)]
+  const entries = [...foodRows.map(entryFromFoodRow), ...activityRows.map(entryFromActivityRow)]
     .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
   let profile = { ...defaultProfile, ...(profileRow?.settings || {}) };
   if (profileRow && profileRow.weight_kg != null && !profileRow.settings?.weightKg) profile.weightKg = Number(profileRow.weight_kg);
   if (latestWeight && !profileRow?.settings?.weightKg) profile.weightKg = Number(latestWeight.weight_kg);
 
-  // First login: preserve existing local data by migrating it to this account.
-  if (entries.length === 0) {
-    const localEntries = loadEntries();
-    if (localEntries.length) {
-      await saveCloudEntries(user.id, localEntries);
-      entries = localEntries;
-    }
-  }
-  if (!profileRow?.settings || Object.keys(profileRow.settings).length === 0) {
-    profile = loadProfile();
-    await saveCloudProfile(user, profile);
-  }
+  // New user: no saved settings yet, so show the onboarding form with clean defaults.
+  const needsOnboarding = !profileRow?.settings || Object.keys(profileRow.settings).length === 0;
+  if (needsOnboarding) profile = { ...defaultProfile };
 
   saveEntries(entries);
   saveProfile(profile);
-  return { entries, profile };
+  return { entries, profile, needsOnboarding };
 }
 
 export async function saveCloudEntries(userId, entries) {

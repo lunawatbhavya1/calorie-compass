@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import Onboarding from "./components/Onboarding.jsx";
 import { supabase } from "./lib/supabase.js";
 import {
   Activity, CalendarDays, ChartNoAxesCombined, ChevronDown, CircleHelp,
@@ -10,7 +11,7 @@ import ChartsPanel from "./components/ChartsPanel.jsx";
 import FoodLog from "./components/FoodLog.jsx";
 import ProfileSettings from "./components/ProfileSettings.jsx";
 import { calculateBMR, calculateTDEE, dateKey, getDailySummary, lastNDays } from "./lib/calculations.js";
-import { loadEntries, loadProfile, saveEntries, saveProfile, loadCloudData, saveCloudEntries, deleteCloudEntry, saveCloudProfile } from "./lib/storage.js";
+import { saveEntries, saveProfile, loadCloudData, saveCloudEntries, deleteCloudEntry, saveCloudProfile, defaultProfile } from "./lib/storage.js";
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -62,36 +63,49 @@ export default function App() {
     }
   };
 
-  const handleSignOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) setSignInError(error.message);
-  };
-
-  const [entries, setEntries] = useState(loadEntries);
-  const [profile, setProfile] = useState(loadProfile);
+  const [entries, setEntries] = useState([]);
+  const [profile, setProfile] = useState(defaultProfile);
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const [dataReady, setDataReady] = useState(false);
   const [selectedDate, setSelectedDate] = useState(dateKey());
   const [page, setPage] = useState("dashboard");
   const [mobileNav, setMobileNav] = useState(false);
 
+  const handleSignOut = async () => {
+    localStorage.removeItem("calorie-compass:entries:v1");
+    localStorage.removeItem("calorie-compass:profile:v1");
+    setEntries([]);
+    setProfile(defaultProfile);
+    setDataReady(false);
+    setNeedsOnboarding(false);
+    const { error } = await supabase.auth.signOut();
+    if (error) setSignInError(error.message);
+  };
+
   useEffect(() => {
     if (!session?.user) return;
     let cancelled = false;
+    setDataReady(false);
     setSyncStatus("Syncing your data…");
     setSyncError("");
     loadCloudData(session.user)
-      .then(({ entries: cloudEntries, profile: cloudProfile }) => {
+      .then(({ entries: cloudEntries, profile: cloudProfile, needsOnboarding: first }) => {
         if (cancelled) return;
         setEntries(cloudEntries);
         setProfile(cloudProfile);
+        setNeedsOnboarding(first);
+        setDataReady(true);
         setSyncStatus("Cloud synced");
       })
       .catch((error) => {
         if (cancelled) return;
         setSyncError(error.message || "Cloud sync failed. Check your Supabase tables and policies.");
         setSyncStatus("Sync unavailable");
+        setDataReady(true);
       });
     return () => { cancelled = true; };
   }, [session?.user?.id]);
+
   const bmr = useMemo(() => calculateBMR(profile), [profile]);
   const baseTdee = useMemo(() => calculateTDEE(bmr, profile.activityLevel), [bmr, profile.activityLevel]);
   const summary = useMemo(() => getDailySummary(entries, selectedDate, bmr, baseTdee), [entries, selectedDate, bmr, baseTdee]);
@@ -172,6 +186,13 @@ export default function App() {
     );
   }
 
+  if (!dataReady) {
+    return <div className="auth-screen"><div className="auth-card"><div className="auth-brand-mark"><Leaf size={27} /></div><h1>Calorie Compass</h1><p>Loading your data…</p><div className="auth-loader" /></div></div>;
+  }
+
+  if (needsOnboarding) {
+  return <Onboarding onSave={(next) => { saveUserProfile(next); setNeedsOnboarding(false); }} />;
+}
 
   return (
     <div className="app-shell">
